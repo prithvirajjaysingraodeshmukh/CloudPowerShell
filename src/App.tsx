@@ -142,7 +142,7 @@ function App() {
     try {
       const remediationEngine = new AIRemediationEngine({
         maxAttempts: 3,
-        minRiskScoreImprovement: 10
+        minRiskScoreImprovement: 5 // Lowered threshold to allow smaller improvements
       });
 
       const config: ValidationConfig = {
@@ -150,7 +150,7 @@ function App() {
           privilegeLevel,
           environmentType
         },
-        enabledPolicies: Array.from(enabledPolicies)
+        enabledPolicies: enabledPolicies.size > 0 ? Array.from(enabledPolicies) : undefined
       };
 
       const remediation = await remediationEngine.generateRemediation(
@@ -715,6 +715,31 @@ function App() {
 
                     {remediationResult && (
                       <div className="space-y-4">
+                        {/* Original vs Remediated Comparison */}
+                        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+                          <h4 className="font-semibold mb-4">Original Analysis Summary</h4>
+                          <div className="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <div className="text-xs text-gray-500">Original Risk Score</div>
+                              <div className="text-lg font-bold">
+                                {remediationResult.originalAnalysis.riskScore?.overallScore || 0}/100
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-500">Original Violations</div>
+                              <div className="text-lg font-bold">
+                                {remediationResult.originalAnalysis.policyValidation?.violations.length || 0}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs text-gray-500">Original Decision</div>
+                              <div className="text-lg font-bold capitalize">
+                                {remediationResult.originalAnalysis.decision?.decision || 'block'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
                         {remediationResult.attempts.map((attempt, idx) => (
                           <div
                             key={idx}
@@ -730,44 +755,115 @@ function App() {
                                 {attempt.validation.status.toUpperCase().replace('_', ' ')}
                               </span>
                             </div>
-                            <div className="space-y-3">
+                            <div className="space-y-4">
                               <div>
                                 <p className="text-sm font-medium mb-1">Suggestion:</p>
                                 <p className="text-sm text-gray-600 dark:text-gray-400">{attempt.suggestion.explanation}</p>
                               </div>
-                              <div>
-                                <p className="text-sm font-medium mb-1">Validation Status:</p>
-                                <p className="text-sm">{attempt.validation.reason}</p>
+                              
+                              {/* Changes Made */}
+                              {attempt.suggestion.changes.length > 0 && (
+                                <div>
+                                  <p className="text-sm font-medium mb-2">Changes Made:</p>
+                                  <div className="space-y-2">
+                                    {attempt.suggestion.changes.map((change, cIdx) => (
+                                      <div key={cIdx} className="text-xs p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                                        <div className="font-medium">{change.type.toUpperCase()}: {change.description}</div>
+                                        {change.original && (
+                                          <div className="mt-1 text-red-600 dark:text-red-400">
+                                            <span className="font-medium">Original:</span> <code className="text-xs">{change.original.substring(0, 80)}{change.original.length > 80 ? '...' : ''}</code>
+                                          </div>
+                                        )}
+                                        {change.replacement && (
+                                          <div className="mt-1 text-green-600 dark:text-green-400">
+                                            <span className="font-medium">Replacement:</span> <code className="text-xs">{change.replacement.substring(0, 80)}{change.replacement.length > 80 ? '...' : ''}</code>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Script Comparison */}
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <p className="text-sm font-medium mb-2">Original Script</p>
+                                  <pre className="text-xs p-3 bg-gray-50 dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 overflow-auto max-h-48 font-mono">
+                                    {scriptContent.substring(0, 500)}{scriptContent.length > 500 ? '\n... (truncated)' : ''}
+                                  </pre>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium mb-2">Remediated Script</p>
+                                  <pre className="text-xs p-3 bg-green-50 dark:bg-green-950 rounded border border-green-200 dark:border-green-800 overflow-auto max-h-48 font-mono">
+                                    {attempt.suggestion.suggestedScript.substring(0, 500)}{attempt.suggestion.suggestedScript.length > 500 ? '\n... (truncated)' : ''}
+                                  </pre>
+                                </div>
                               </div>
-                              <div className="grid grid-cols-3 gap-3 text-sm">
-                                <div>
-                                  <div className="text-xs text-gray-500">Risk Score Change</div>
-                                  <div className={`font-bold ${
-                                    attempt.validation.improvement.riskScoreChange > 0 ? 'text-green-600' : 'text-red-600'
-                                  }`}>
-                                    {attempt.validation.improvement.riskScoreChange > 0 ? '+' : ''}
-                                    {attempt.validation.improvement.riskScoreChange}
+
+                              {/* Validation Results */}
+                              <div>
+                                <p className="text-sm font-medium mb-2">Validation Results:</p>
+                                <p className="text-sm mb-3">{attempt.validation.reason}</p>
+                                <div className="grid grid-cols-3 gap-3 text-sm">
+                                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                                    <div className="text-xs text-gray-500 mb-1">Risk Score</div>
+                                    <div className="text-lg font-bold">
+                                      <span className="text-gray-600 dark:text-gray-400">
+                                        {remediationResult.originalAnalysis.riskScore?.overallScore || 0}
+                                      </span>
+                                      {' → '}
+                                      <span className={attempt.validation.improvement.riskScoreChange > 0 ? 'text-green-600' : 'text-red-600'}>
+                                        {attempt.validation.analysisResult.riskScore?.overallScore || 0}
+                                      </span>
+                                    </div>
+                                    <div className={`text-xs mt-1 ${
+                                      attempt.validation.improvement.riskScoreChange > 0 ? 'text-green-600' : 'text-red-600'
+                                    }`}>
+                                      {attempt.validation.improvement.riskScoreChange > 0 ? '+' : ''}
+                                      {attempt.validation.improvement.riskScoreChange} points
+                                    </div>
                                   </div>
-                                </div>
-                                <div>
-                                  <div className="text-xs text-gray-500">Violations Change</div>
-                                  <div className={`font-bold ${
-                                    attempt.validation.improvement.policyViolationsChange > 0 ? 'text-green-600' : 'text-red-600'
-                                  }`}>
-                                    {attempt.validation.improvement.policyViolationsChange > 0 ? '+' : ''}
-                                    {attempt.validation.improvement.policyViolationsChange}
+                                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                                    <div className="text-xs text-gray-500 mb-1">Policy Violations</div>
+                                    <div className="text-lg font-bold">
+                                      <span className="text-gray-600 dark:text-gray-400">
+                                        {remediationResult.originalAnalysis.policyValidation?.violations.length || 0}
+                                      </span>
+                                      {' → '}
+                                      <span className={attempt.validation.improvement.policyViolationsChange > 0 ? 'text-green-600' : 'text-red-600'}>
+                                        {attempt.validation.analysisResult.policyValidation?.violations.length || 0}
+                                      </span>
+                                    </div>
+                                    <div className={`text-xs mt-1 ${
+                                      attempt.validation.improvement.policyViolationsChange > 0 ? 'text-green-600' : 'text-red-600'
+                                    }`}>
+                                      {attempt.validation.improvement.policyViolationsChange > 0 ? '+' : ''}
+                                      {attempt.validation.improvement.policyViolationsChange} violations
+                                    </div>
                                   </div>
-                                </div>
-                                <div>
-                                  <div className="text-xs text-gray-500">Decision Change</div>
-                                  <div className="font-bold">{attempt.validation.improvement.decisionChange}</div>
+                                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                                    <div className="text-xs text-gray-500 mb-1">Decision</div>
+                                    <div className="text-lg font-bold">
+                                      <span className="text-gray-600 dark:text-gray-400 capitalize">
+                                        {remediationResult.originalAnalysis.decision?.decision || 'block'}
+                                      </span>
+                                      {' → '}
+                                      <span className={attempt.validation.improvement.decisionChange.includes('→ allow') || attempt.validation.improvement.decisionChange.includes('→ review') ? 'text-green-600' : 'text-red-600'}>
+                                        {attempt.validation.analysisResult.decision?.decision || 'block'}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs mt-1 text-gray-500">
+                                      {attempt.validation.improvement.decisionChange}
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             </div>
                           </div>
                         ))}
                         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                          <p className="text-sm font-medium mb-2">Status:</p>
+                          <p className="text-sm font-medium mb-2">Final Status:</p>
                           <p className="text-sm">{remediationResult.statusMessage}</p>
                         </div>
                       </div>

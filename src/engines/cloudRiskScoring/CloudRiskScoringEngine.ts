@@ -171,15 +171,20 @@ export class CloudRiskScoringEngine {
   calculateRiskScore(
     staticAnalysisFeatures: any,
     cloudExecutionContext: CloudExecutionContext,
-    policyValidationReport: PolicyValidationReport
+    policyValidationReport: PolicyValidationReport,
+    scriptContent?: string
   ): RiskScore {
-    // Calculate component scores
-    const policyViolationRisk = this.calculatePolicyViolationRisk(policyValidationReport);
+    // Detect mitigations in script (if provided)
+    const mitigations = scriptContent ? this.detectMitigations(scriptContent) : null;
+    
+    // Calculate component scores with mitigation adjustments
+    const policyViolationRisk = this.calculatePolicyViolationRisk(policyValidationReport, mitigations);
     const privilegeLevelRisk = this.calculatePrivilegeLevelRisk(cloudExecutionContext);
     const obfuscationRisk = this.calculateObfuscationRisk(staticAnalysisFeatures);
     const networkExposureRisk = this.calculateNetworkExposureRisk(
       cloudExecutionContext,
-      staticAnalysisFeatures
+      staticAnalysisFeatures,
+      mitigations
     );
 
     // Calculate weighted overall score
@@ -246,15 +251,15 @@ export class CloudRiskScoringEngine {
 
   /**
    * Calculate risk from policy violations
+   * Now includes mitigation-aware scoring
    */
-  private calculatePolicyViolationRisk(report: PolicyValidationReport): number {
+  private calculatePolicyViolationRisk(report: PolicyValidationReport, mitigations: any = null): number {
     if (report.violations.length === 0) {
       return 0;
     }
 
     // Calculate weighted violation score
     let violationScore = 0;
-    let totalWeight = 0;
 
     // Severity weights
     const severityWeights = {
@@ -281,7 +286,24 @@ export class CloudRiskScoringEngine {
     // Normalize based on total violations (cap at 100)
     // Multiple violations increase risk, but with diminishing returns
     const totalViolations = report.violations.length;
-    const normalizedScore = Math.min(100, violationScore / Math.max(1, totalViolations * 0.5));
+    let normalizedScore = Math.min(100, violationScore / Math.max(1, totalViolations * 0.5));
+
+    // Apply mitigation reduction if mitigations are present
+    if (mitigations) {
+      // Reduce risk if mitigations are detected (e.g., allowlists, checksums)
+      if (mitigations.hasAllowlist) {
+        normalizedScore *= 0.7; // 30% reduction for allowlist validation
+      }
+      if (mitigations.hasChecksum) {
+        normalizedScore *= 0.8; // 20% reduction for checksum verification
+      }
+      if (mitigations.hasSecureCredentials) {
+        normalizedScore *= 0.6; // 40% reduction for secure credential handling
+      }
+      if (mitigations.hasErrorHandling) {
+        normalizedScore *= 0.9; // 10% reduction for error handling
+      }
+    }
 
     // Apply compliance penalty
     const compliancePenalty = (100 - report.overallCompliance) * 0.5;
@@ -351,10 +373,12 @@ export class CloudRiskScoringEngine {
 
   /**
    * Calculate risk from network exposure
+   * Now includes mitigation-aware scoring
    */
   private calculateNetworkExposureRisk(
     context: CloudExecutionContext,
-    features: any
+    features: any,
+    mitigations: any = null
   ): number {
     let risk = 0;
 
@@ -382,7 +406,62 @@ export class CloudRiskScoringEngine {
       risk += 10;
     }
 
+    // Apply mitigation reduction if mitigations are present
+    if (mitigations) {
+      // Significant reduction if allowlist validation is present
+      if (mitigations.hasAllowlist && context.networkExposure === NetworkExposure.INTERNET_FACING) {
+        risk *= 0.5; // 50% reduction - allowlist validation significantly reduces risk
+      }
+      // Additional reduction for checksum verification
+      if (mitigations.hasChecksum) {
+        risk *= 0.8; // 20% additional reduction
+      }
+      // Reduction for UseBasicParsing flag
+      if (mitigations.hasUseBasicParsing) {
+        risk *= 0.9; // 10% reduction
+      }
+    }
+
     return Math.min(100, risk);
+  }
+
+  /**
+   * Detect security mitigations in script content
+   * Recognizes patterns that reduce risk even if operations remain
+   */
+  private detectMitigations(scriptContent: string): {
+    hasAllowlist: boolean;
+    hasChecksum: boolean;
+    hasSecureCredentials: boolean;
+    hasErrorHandling: boolean;
+    hasUseBasicParsing: boolean;
+  } {
+    const lowerContent = scriptContent.toLowerCase();
+    
+    return {
+      // Check for allowlist validation patterns
+      hasAllowlist: /allowedurls\s*=/.test(lowerContent) || 
+                    /allowedcommands\s*=/.test(lowerContent) ||
+                    /-contains\s+\$requestUrl/.test(lowerContent) ||
+                    /-contains\s+\$commandName/.test(lowerContent),
+      
+      // Check for checksum/hash verification
+      hasChecksum: /get-filehash/.test(lowerContent) ||
+                   /expectedhash/.test(lowerContent) ||
+                   /downloadedhash/.test(lowerContent) ||
+                   /hash\s*verification/.test(lowerContent),
+      
+      // Check for secure credential handling
+      hasSecureCredentials: /read-host\s+-assecurestring/.test(lowerContent) ||
+                            /get-azkeyvaultsecret/.test(lowerContent) ||
+                            /\.secretvalue/.test(lowerContent),
+      
+      // Check for error handling
+      hasErrorHandling: /try\s*\{/.test(lowerContent) && /catch\s*\{/.test(lowerContent),
+      
+      // Check for UseBasicParsing flag
+      hasUseBasicParsing: /-usebasicparsing/.test(lowerContent)
+    };
   }
 
   /**

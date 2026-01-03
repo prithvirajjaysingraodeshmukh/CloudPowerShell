@@ -78,8 +78,8 @@ export function runCloudSecurityValidation(
   }
   const policyValidation = cloudSecurityPolicyEngine.validate(scriptContent, features, cloudContext);
   
-  // Step 4: Cloud Risk Scoring
-  const riskScore = cloudRiskScoringEngine.calculateRiskScore(features, cloudContext, policyValidation);
+  // Step 4: Cloud Risk Scoring (with script content for mitigation detection)
+  const riskScore = cloudRiskScoringEngine.calculateRiskScore(features, cloudContext, policyValidation, scriptContent);
   
   // Step 5: DevSecOps Decision
   const decision = devsecopsDecisionEngine.makeDecision(features, cloudContext, policyValidation, riskScore);
